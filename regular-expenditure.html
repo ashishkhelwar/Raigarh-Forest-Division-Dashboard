@@ -243,6 +243,7 @@ tfoot td.num{text-align:right;font-variant-numeric:tabular-nums}
     <div class="tab" onclick="showTab('ranges',this)">🗺 परिक्षेत्रवार</div>
     <div class="tab" onclick="showTab('years',this)">📅 वर्षवार</div>
     <div class="tab" onclick="showTab('works',this)">📄 कार्यवार विवरण</div>
+    <div class="tab" onclick="showTab('form7',this)">📑 फॉर्म-7 योजनावार</div>
   </div>
 
   <!-- FILTER BAR (shared) -->
@@ -292,6 +293,25 @@ tfoot td.num{text-align:right;font-variant-numeric:tabular-nums}
     </div></div>
     <!-- Site-level detail (shown when a scheme is selected in filter) -->
     <div id="scheme-site-detail" style="display:none"></div>
+  </div>
+
+  <!-- TAB: FORM 7 (scheme-level monthly position, division) -->
+  <div id="tab-form7" class="content">
+    <div class="sec">फॉर्म-7 योजनावार व्यय स्थिति — <span id="f7-month">…</span> (वनमंडल स्तर)</div>
+    <div class="kpi-grid" id="f7-kpi"></div>
+    <div class="table-glass"><div class="table-scroll">
+      <table id="f7-table">
+        <thead><tr>
+          <th class="l">बजट शीर्ष</th><th class="l">योजना</th>
+          <th>आवंटन (₹)</th><th>गत माह तक व्यय (₹)</th><th>चालू माह व्यय (₹)</th><th>कुल व्यय (₹)</th><th>% उपयोग</th>
+        </tr></thead>
+        <tbody id="f7-tbody"></tbody>
+        <tfoot id="f7-tfoot"></tfoot>
+      </table>
+    </div></div>
+    <div id="f7-note" style="font-size:12.5px;color:var(--muted);margin-top:10px">
+      स्रोत: फॉर्म-7 मासिक व्यय विवरण, वनमंडल रायगढ़ &middot; Google Sheet टैब <b>Form7</b> &middot; यह योजना-स्तरीय आँकड़े हैं, कार्यवार नहीं।
+    </div>
   </div>
 
   <!-- TAB: RANGES -->
@@ -489,6 +509,40 @@ function processCSV(txt){
 }
 
 // Common post-load
+
+// ── Form-7 tab: scheme-level monthly position from the "Form7" sheet tab ──
+function loadForm7(){
+  const url=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Form7&_=${Date.now()}`;
+  fetch(url).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+    .then(txt=>renderForm7(parseCSV(txt)))
+    .catch(()=>{ document.getElementById('f7-note').innerHTML='<b>Form7 टैब नहीं मिला।</b> Google Sheet में "Form7" नाम का टैब बनाकर उसमें Month, Section, Scheme_Code, Scheme_Name, Allocation, Upto_Last_Month, Current_Month, Total_Exp कॉलम रखें।'; });
+}
+function renderForm7(rows){
+  const num=v=>{ const n=Number(String(v).replace(/,/g,'').trim()); return isNaN(n)?0:n; };
+  const hdr=rows[0].map(c=>String(c).trim()); const ix=n=>hdr.indexOf(n);
+  const R=rows.slice(1).filter(r=>r[ix('Scheme_Code')]).map(r=>({
+    month:r[ix('Month')], sec:r[ix('Section')], code:r[ix('Scheme_Code')], name:r[ix('Scheme_Name')],
+    al:num(r[ix('Allocation')]), up:num(r[ix('Upto_Last_Month')]), cu:num(r[ix('Current_Month')]), to:num(r[ix('Total_Exp')]) }));
+  if(!R.length) return;
+  const month=R[0].month||''; document.getElementById('f7-month').textContent=month;
+  const S=k=>R.reduce((a,x)=>a+x[k],0); const AL=S('al'),UP=S('up'),CU=S('cu'),TO=S('to');
+  document.getElementById('f7-kpi').innerHTML=[
+    ['accent-blue','💰','कुल आवंटन',fmt(AL),`₹${lakh(AL)} लाख`],
+    ['accent-cyan','📆','गत माह तक व्यय',fmt(UP),`${pct(UP,AL)}% आवंटन का`],
+    ['accent-orange','🗓','चालू माह व्यय ('+month+')',fmt(CU),`₹${lakh(CU)} लाख`],
+    ['accent-green','✅','कुल व्यय',fmt(TO),`${pct(TO,AL)}% उपयोग · शेष ${fmt(AL-TO)}`]
+  ].map(([c,i,l,v,s])=>`<div class="kpi ${c}"><div class="kpi-icon">${i}</div><div class="kpi-lbl">${l}</div><div class="kpi-val">${v}</div><div class="kpi-sub">${s}</div></div>`).join('');
+  const secs=[...new Set(R.map(x=>x.sec))]; let html='';
+  secs.forEach(sec=>{
+    const g=R.filter(x=>x.sec===sec); const T=k=>g.reduce((a,x)=>a+x[k],0);
+    g.forEach(x=>{ html+=`<tr><td class="l">${sec}</td><td class="l">(${x.code}) ${x.name}</td><td>${fmtN(x.al)}</td><td>${fmtN(x.up)}</td><td>${fmtN(x.cu)}</td><td>${fmtN(x.to)}</td><td>${pct(x.to,x.al)}%</td></tr>`; });
+    html+=`<tr style="font-weight:700;background:var(--bg2,rgba(0,0,0,.04))"><td class="l">योग — ${sec}</td><td></td><td>${fmtN(T('al'))}</td><td>${fmtN(T('up'))}</td><td>${fmtN(T('cu'))}</td><td>${fmtN(T('to'))}</td><td>${pct(T('to'),T('al'))}%</td></tr>`;
+  });
+  document.getElementById('f7-tbody').innerHTML=html;
+  document.getElementById('f7-tfoot').innerHTML=`<tr style="font-weight:800"><td class="l">महायोग</td><td></td><td>${fmtN(AL)}</td><td>${fmtN(UP)}</td><td>${fmtN(CU)}</td><td>${fmtN(TO)}</td><td>${pct(TO,AL)}%</td></tr>`;
+}
+loadForm7();
+
 function finishLoad(){
   document.getElementById('loading').style.display='none';
   document.getElementById('filterBar').style.display='flex';
